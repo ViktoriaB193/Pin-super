@@ -206,6 +206,19 @@
         const data = ${JSON.stringify(cfg.data)};
         let curIdx = 0, canPaint = false, solved = [];
 
+        // ✅ ГРУППИРОВКА: несколько областей могут относиться к одному заданию
+        const tasks = [];
+        const taskMap = {};
+        for(let i=0;i<data.length;i++){
+            const k = (data[i].task + '||' + data[i].answer).toString();
+            if(!taskMap[k]){
+                taskMap[k] = { task: data[i].task, answer: data[i].answer, color: data[i].color, idxs: [] };
+                tasks.push(taskMap[k]);
+            }
+            taskMap[k].idxs.push(i);
+        }
+        let curTask = 0;
+
         // ✅ улучшение: умное авто-уменьшение размера текста под область (без OCR, по bbox)
         function getBBoxFromPoints(pts){
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -223,11 +236,11 @@
         }
 
         function renderTask() {
-            if(curIdx >= data.length) {
+            if(curTask >= tasks.length) {
                 document.getElementById('q-box').innerHTML = '<h1 style="color:${cfg.glow}">ГЕНИАЛЬНО! 🎉</h1><p>Вы раскрасили всё!</p>';
                 return;
             }
-            const q = data[curIdx];
+            const q = tasks[curTask];
             const field = document.getElementById('math-field');
             if(q.task.includes('\\\\') || q.task.includes('^') || q.task.includes('_')) {
                 try { katex.render(q.task, field); } catch(e) { field.textContent = q.task; }
@@ -240,9 +253,10 @@
 
         window.checkAnswer = () => {
             const val = document.getElementById('userAns').value.trim().toLowerCase();
-            if(val === data[curIdx].answer.toLowerCase()) {
+            if(curTask >= tasks.length) return;
+            if(val === tasks[curTask].answer.toLowerCase()) {
                 document.getElementById('feedback').innerHTML = '✅ Верно! Нажми на область с ответом на рисунке →';
-                document.getElementById('p-can').style.backgroundColor = data[curIdx].color;
+                document.getElementById('p-can').style.backgroundColor = tasks[curTask].color;
                 document.getElementById('p-can').style.display = 'inline-block';
                 canPaint = true;
             } else { document.getElementById('feedback').textContent = '❌ Неверно, попробуй еще раз'; }
@@ -250,7 +264,7 @@
 
         window.enablePainting = () => {
             canPaint = true;
-            document.getElementById('feedback').textContent = '🎨 Теперь нажми на ' + data[curIdx].answer + ' на рисунке!';
+            if(curTask < tasks.length) document.getElementById('feedback').textContent = '🎨 Теперь нажми на ' + tasks[curTask].answer + ' на рисунке!';
         };
 
         function draw() {
@@ -293,16 +307,24 @@
         window.clickR = (i) => {
             if(!canPaint) return;
             if(solved.includes(i)) return;
+            if(curTask >= tasks.length) return;
 
-            // ✅ привязка области к заданию по ОТВЕТУ (а не по порядку)
-            const need = (data[curIdx].answer || '').toString().trim().toLowerCase();
-            const got = (data[i].answer || '').toString().trim().toLowerCase();
-            if(got !== need) return;
+            // ✅ разрешаем красить ТОЛЬКО области, принадлежащие текущему заданию
+            const group = tasks[curTask];
+            if(!group.idxs.includes(i)) return;
 
             solved.push(i);
-            curIdx++;
+
+            // ✅ если все области текущего задания закрашены — переходим к следующему
+            const doneAll = group.idxs.every(idx => solved.includes(idx));
+            if(doneAll) {
+                curTask++;
+                canPaint = false;
+                renderTask();
+            }
+
             document.getElementById('p-inner').style.width = (solved.length/data.length*100)+'%';
-            draw(); renderTask();
+            draw();
         };
 
         renderTask(); draw();
